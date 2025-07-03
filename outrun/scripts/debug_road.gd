@@ -8,14 +8,14 @@ const RUMBLE_LENGTH = 3
 const LANES = 3
 const CAMERA_HEIGHT = 1000
 const CAMERA_DEPTH = 0.84
-const DRAW_DISTANCE = 400
+const DRAW_DISTANCE = 200
 
 # Player constants  
 const MAX_SPEED = 6000.0
 const ACCELERATION = 2000.0
 const BRAKING = 4000.0
 const TURN_SPEED = 0.002
-const OFFROAD_DECEL = 3000.0
+const OFFROAD_DECEL = 0
 const OFFROAD_MAX_SPEED = MAX_SPEED / 2
 
 # Colors
@@ -139,28 +139,50 @@ func handle_input(delta):
 	elif Input.is_action_pressed("ui_right"):
 		steer_input = 1.0
 	
+	# Apply steering with speed-based sensitivity (using your tuned value)
 	var speed_factor = speed / MAX_SPEED
 	player_x += steer_input * TURN_SPEED * speed_factor * delta
 	player_x = clamp(player_x, -2.0, 2.0)
 	
-	is_offroad = abs(player_x) > 1.0
+	# Check if off-road (with correct threshold)
+	is_offroad = abs(player_x) > 0.001  # Adjusted threshold since player_x is -2 to 2
 
 func update_player_position():
 	var viewport_size = get_viewport_rect().size
 	var road_center = viewport_size.x / 2
 	var screen_x = road_center + (player_x * viewport_size.x * 0.4)
 	
-	player_sprite.position = Vector2(screen_x, viewport_size.y - 100)
+	# Add shake when off-road
+	if is_offroad:
+		screen_x += sin(Time.get_ticks_msec() * 0.1) * 5.0
+		player_sprite.position.y = viewport_size.y - 100 + sin(Time.get_ticks_msec() * 0.15) * 3.0
+	else:
+		player_sprite.position.y = viewport_size.y - 100
+	
+	player_sprite.position.x = screen_x
 	player_sprite.rotation = player_x * 0.1
 	
 	# Scale based on speed
 	var scale = 1.0 + (speed / MAX_SPEED) * 0.1
 	player_sprite.scale = Vector2(scale, scale)
+	
+	# Change car color when off-road
+	if is_offroad:
+		player_sprite.modulate = Color(1, 0.7, 0.7)  # Reddish tint
+	else:
+		player_sprite.modulate = Color.WHITE
 
 func update_ui():
 	var speed_kmh = int(speed / 25)  # Adjusted conversion for display
 	speed_label.text = "Speed: %d km/h" % speed_kmh
-	debug_label.text = "Pos X: %.2f | Off-road: %s" % [player_x, is_offroad]
+	
+	# Add color to debug text when off-road
+	if is_offroad:
+		debug_label.modulate = Color(1, 0.5, 0.5)
+		debug_label.text = "Pos X: %.2f | OFF-ROAD! | Rumble Strips!" % [player_x]
+	else:
+		debug_label.modulate = Color.WHITE
+		debug_label.text = "Pos X: %.2f | On Road" % [player_x]
 
 func _draw():
 	var viewport_size = get_viewport_rect().size
