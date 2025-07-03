@@ -3,7 +3,7 @@ extends Node2D
 
 # Road constants
 const ROAD_WIDTH = 2000000
-const SEGMENT_LENGTH = 150
+const SEGMENT_LENGTH = 200
 const RUMBLE_LENGTH = 3
 const LANES = 3
 const CAMERA_HEIGHT = 1000
@@ -200,6 +200,14 @@ func _draw():
 		var far_y = previous_y
 		var near_y = near.y
 		
+		# Additional validation
+		if abs(far_y - near_y) < 0.1:  # Too small to draw
+			continue
+		
+		# Clamp coordinates to screen bounds
+		near_y = clamp(near_y, 0, height)
+		far_y = clamp(far_y, 0, height)
+		
 		# Determine colors based on segment position
 		var grass_color = GRASS_COLOR_LIGHT if (seg_index / RUMBLE_LENGTH) % 2 else GRASS_COLOR_DARK
 		var rumble_color = RUMBLE_COLOR_WHITE if (seg_index / RUMBLE_LENGTH) % 2 else RUMBLE_COLOR_RED
@@ -213,44 +221,77 @@ func _draw():
 		var near_road_width = near.w
 		var far_road_width = near_road_width * 0.1 if previous_y == height / 2 else near_road_width * 0.8  # Better perspective
 		
+		# Validate road width
+		if near_road_width <= 0 or far_road_width <= 0:
+			previous_y = near_y
+			continue
+		
+		# Ensure X coordinates are valid
+		var road_left = near.x - near_road_width
+		var road_right = near.x + near_road_width
+		
 		# Draw rumble strips
 		var rumble_width = near_road_width * 0.15
-		var far_rumble_width = far_road_width * 0.15
-		
-		# Left rumble
-		draw_polygon(PackedVector2Array([
-			Vector2(near.x - near_road_width - rumble_width, far_y),
-			Vector2(near.x - near_road_width, far_y),
-			Vector2(near.x - near_road_width, near_y),
-			Vector2(near.x - near_road_width - rumble_width, near_y)
-		]), PackedColorArray([rumble_color]))
-		
-		# Right rumble  
-		draw_polygon(PackedVector2Array([
-			Vector2(near.x + near_road_width, far_y),
-			Vector2(near.x + near_road_width + rumble_width, far_y),
-			Vector2(near.x + near_road_width + rumble_width, near_y),
-			Vector2(near.x + near_road_width, near_y)
-		]), PackedColorArray([rumble_color]))
+		if rumble_width > 0:
+			# Left rumble
+			_draw_quad(
+				road_left - rumble_width, far_y,
+				road_left, far_y,
+				road_left, near_y,
+				road_left - rumble_width, near_y,
+				rumble_color
+			)
+			
+			# Right rumble
+			_draw_quad(
+				road_right, far_y,
+				road_right + rumble_width, far_y,
+				road_right + rumble_width, near_y,
+				road_right, near_y,
+				rumble_color
+			)
 		
 		# Draw road
-		draw_polygon(PackedVector2Array([
-			Vector2(near.x - near_road_width, far_y),
-			Vector2(near.x + near_road_width, far_y),
-			Vector2(near.x + near_road_width, near_y),
-			Vector2(near.x - near_road_width, near_y)
-		]), PackedColorArray([road_color]))
+		_draw_quad(
+			road_left, far_y,
+			road_right, far_y,
+			road_right, near_y,
+			road_left, near_y,
+			road_color
+		)
 		
 		# Draw lane lines
-		if (seg_index / RUMBLE_LENGTH) % 2 and far_y > near_y:
-			var lane_width = near_road_width * 0.02
+		if (seg_index / RUMBLE_LENGTH) % 2:
+			var lane_width = max(1.0, near_road_width * 0.02)
 			for lane in range(1, LANES):
 				var lane_x = near.x - near_road_width + (near_road_width * 2 * lane / LANES)
-				draw_polygon(PackedVector2Array([
-					Vector2(lane_x - lane_width, far_y),
-					Vector2(lane_x + lane_width, far_y),
-					Vector2(lane_x + lane_width, near_y),
-					Vector2(lane_x - lane_width, near_y)
-				]), PackedColorArray([LANE_COLOR]))
+				_draw_quad(
+					lane_x - lane_width, far_y,
+					lane_x + lane_width, far_y,
+					lane_x + lane_width, near_y,
+					lane_x - lane_width, near_y,
+					LANE_COLOR
+				)
 		
 		previous_y = near_y
+
+func _draw_quad(x1: float, y1: float, x2: float, y2: float, 
+				x3: float, y3: float, x4: float, y4: float, color: Color):
+	# Validate coordinates
+	if is_nan(x1) or is_nan(y1) or is_nan(x2) or is_nan(y2) or \
+	   is_nan(x3) or is_nan(y3) or is_nan(x4) or is_nan(y4):
+		return
+	
+	# Check for degenerate quad
+	if (abs(x1 - x2) < 0.01 and abs(x3 - x4) < 0.01) or \
+	   (abs(y1 - y4) < 0.01 and abs(y2 - y3) < 0.01):
+		return
+	
+	var points = PackedVector2Array([
+		Vector2(x1, y1),
+		Vector2(x2, y2),
+		Vector2(x3, y3),
+		Vector2(x4, y4)
+	])
+	
+	draw_colored_polygon(points, color)
