@@ -2,7 +2,7 @@ extends Node2D
 # Working pseudo-3D road renderer for Outrun-style racing
 
 # Road constants
-const ROAD_WIDTH = 2000000
+const ROAD_WIDTH = 1500000
 const SEGMENT_LENGTH = 200
 const RUMBLE_LENGTH = 3
 const LANES = 3
@@ -14,8 +14,8 @@ const DRAW_DISTANCE = 200
 const MAX_SPEED = 6000.0
 const ACCELERATION = 2000.0
 const BRAKING = 4000.0
-const TURN_SPEED = 0.002
-const OFFROAD_DECEL = 0
+const TURN_SPEED = 0.0025
+const OFFROAD_DECEL = 0  # No deceleration when off-road
 const OFFROAD_MAX_SPEED = MAX_SPEED / 2
 
 # Colors
@@ -30,10 +30,11 @@ const SKY_COLOR = Color(0.5, 0.7, 1.0)
 
 # Game state
 var camera_z = 0.0
-var player_x = 0.0  # -1 to 1
+var player_x = 0.0  # Player position on road
 var speed = 0.0
 var is_offroad = false
 var segments = []
+var current_curve = 0.0
 
 # UI
 var speed_label: Label
@@ -42,14 +43,14 @@ var player_sprite: Sprite2D
 
 class Segment:
 	var index: int
-	var world_z: float  # World Z position
+	var world_z: float
 	var curve: float = 0.0
 	
 	func project(camera_x: float, camera_y: float, camera_z: float, screen_width: float, screen_height: float) -> Dictionary:
 		var scale = CAMERA_DEPTH / max(1, self.world_z - camera_z)
 		var screen_x = screen_width / 2 + scale * camera_x * screen_width / 2
 		var screen_y = screen_height / 2 + scale * camera_y * screen_height / 2
-		var screen_w = scale * ROAD_WIDTH * screen_width / 4000  # Adjusted scaling
+		var screen_w = scale * ROAD_WIDTH * screen_width / 4000
 		
 		return {
 			"x": screen_x,
@@ -61,12 +62,26 @@ class Segment:
 func _ready():
 	print("Working Road Renderer Started")
 	
-	# Initialize segments
+	# Initialize segments - ensure first segments are straight
 	for i in range(500):
 		var seg = Segment.new()
 		seg.index = i
 		seg.world_z = i * SEGMENT_LENGTH
+		seg.curve = 0  # Default to straight
+		
+		# Add gentler curves
+		if i > 200 and i < 250:
+			seg.curve = 0.3  # Reduced from 0.5
+		elif i > 300 and i < 350:
+			seg.curve = -0.3  # Reduced from -0.5
+		elif i > 400 and i < 450:
+			seg.curve = 0.5  # Moderate curve
+			
 		segments.append(seg)
+	
+	# Start at z=0 to ensure we begin on straight road
+	camera_z = 0.0
+	player_x = 0.0
 	
 	create_ui()
 	create_player_sprite()
@@ -105,7 +120,7 @@ func create_player_sprite():
 	
 	var texture = ImageTexture.create_from_image(image)
 	player_sprite.texture = texture
-	player_sprite.z_index = 100  # Always on top
+	player_sprite.z_index = 100
 
 func _process(delta):
 	handle_input(delta)
@@ -115,37 +130,40 @@ func _process(delta):
 	queue_redraw()
 
 func handle_input(delta):
+	# Get current segment to check for curves
+	var current_segment_index = int(camera_z / SEGMENT_LENGTH) % segments.size()
+	if current_segment_index >= 0 and current_segment_index < segments.size():
+		current_curve = segments[current_segment_index].curve
+	
 	# Acceleration/Braking
 	if Input.is_action_pressed("ui_up"):
-		if is_offroad and speed > OFFROAD_MAX_SPEED:
-			speed -= OFFROAD_DECEL * delta
-		else:
-			speed += ACCELERATION * delta
+		speed += ACCELERATION * delta
 	elif Input.is_action_pressed("ui_down"):
 		speed -= BRAKING * delta
 	else:
 		speed -= 50.0 * delta
 	
-	if is_offroad:
-		speed -= OFFROAD_DECEL * delta
-		speed = min(speed, OFFROAD_MAX_SPEED)
-	
 	speed = clamp(speed, 0, MAX_SPEED)
 	
-	# Steering
+	# Steering - let's fix this properly
 	var steer_input = 0.0
 	if Input.is_action_pressed("ui_left"):
-		steer_input = -1.0
+		steer_input = -1.0  # Left should decrease player_x
 	elif Input.is_action_pressed("ui_right"):
-		steer_input = 1.0
+		steer_input = 1.0   # Right should increase player_x
 	
-	# Apply steering with speed-based sensitivity (using your tuned value)
+	# Apply steering
 	var speed_factor = speed / MAX_SPEED
 	player_x += steer_input * TURN_SPEED * speed_factor * delta
+	
+	# Apply centrifugal force in curves
+	var centrifugal_force = current_curve * speed_factor * 0.004
+	player_x -= centrifugal_force * delta
+	
 	player_x = clamp(player_x, -2.0, 2.0)
 	
-	# Check if off-road (with correct threshold)
-	is_offroad = abs(player_x) > 0.001  # Adjusted threshold since player_x is -2 to 2
+	# Simple off-road detection
+	is_offroad = abs(player_x) > 0.001
 
 func update_player_position():
 	var viewport_size = get_viewport_rect().size
@@ -168,21 +186,26 @@ func update_player_position():
 	
 	# Change car color when off-road
 	if is_offroad:
-		player_sprite.modulate = Color(1, 0.7, 0.7)  # Reddish tint
+		player_sprite.modulate = Color(1, 0.7, 0.7)
 	else:
 		player_sprite.modulate = Color.WHITE
 
 func update_ui():
-	var speed_kmh = int(speed / 25)  # Adjusted conversion for display
+	var speed_kmh = int(speed / 25)
 	speed_label.text = "Speed: %d km/h" % speed_kmh
 	
-	# Add color to debug text when off-road
+	# Show curve info
+	var curve_dir = ""
+	if abs(current_curve) > 0.1:
+		curve_dir = " | CURVE " + ("RIGHT" if current_curve > 0 else "LEFT")
+	
+	# Debug text
 	if is_offroad:
 		debug_label.modulate = Color(1, 0.5, 0.5)
-		debug_label.text = "Pos X: %.2f | OFF-ROAD! | Rumble Strips!" % [player_x]
+		debug_label.text = "Pos X: %.3f | OFF-ROAD!%s" % [player_x, curve_dir]
 	else:
 		debug_label.modulate = Color.WHITE
-		debug_label.text = "Pos X: %.2f | On Road" % [player_x]
+		debug_label.text = "Pos X: %.3f | On Road%s" % [player_x, curve_dir]
 
 func _draw():
 	var viewport_size = get_viewport_rect().size
@@ -195,12 +218,14 @@ func _draw():
 	
 	# Find base segment
 	var base_segment = int(camera_z / SEGMENT_LENGTH)
-	var segment_offset = fmod(camera_z, SEGMENT_LENGTH)
 	var camera_x = player_x * ROAD_WIDTH * 0.5
 	
 	# Draw segments from far to near
-	var previous_y = height / 2  # Horizon line
+	var previous_y = height / 2
+	var x = 0.0
+	var dx = 0.0
 	
+	# Reset curve accumulation for each frame
 	for n in range(DRAW_DISTANCE, 0, -1):
 		var seg_index = (base_segment + n) % segments.size()
 		if seg_index < 0:
@@ -212,8 +237,15 @@ func _draw():
 		var segment_base = int((camera_z + n * SEGMENT_LENGTH) / (segments.size() * SEGMENT_LENGTH))
 		segment.world_z = (seg_index * SEGMENT_LENGTH) + (segment_base * segments.size() * SEGMENT_LENGTH)
 		
-		# Project current segment position
+		# Apply curve - accumulate from the farthest segment
+		dx += segment.curve * 0.00002  # MUCH smaller curve intensity
+		x += dx
+		
+		# Project segment position - simple centered projection
 		var near = segment.project(-camera_x, CAMERA_HEIGHT, camera_z, width, height)
+		
+		# Apply curve offset to X position after projection
+		near.x += x * 2000  # Reduced from 200 to compensate for smaller curve values
 		
 		# Skip if behind camera or above previous segment
 		if near.scale <= 0 or near.y <= previous_y:
@@ -223,7 +255,7 @@ func _draw():
 		var near_y = near.y
 		
 		# Additional validation
-		if abs(far_y - near_y) < 0.1:  # Too small to draw
+		if abs(far_y - near_y) < 0.1:
 			continue
 		
 		# Clamp coordinates to screen bounds
@@ -235,16 +267,16 @@ func _draw():
 		var rumble_color = RUMBLE_COLOR_WHITE if (seg_index / RUMBLE_LENGTH) % 2 else RUMBLE_COLOR_RED
 		var road_color = ROAD_COLOR_LIGHT if (seg_index / RUMBLE_LENGTH) % 2 else ROAD_COLOR_DARK
 		
-		# Draw grass (full width)
+		# Draw grass
 		if far_y > near_y:
 			draw_rect(Rect2(0, near_y, width, far_y - near_y), grass_color)
 		
 		# Calculate road edges
 		var near_road_width = near.w
-		var far_road_width = near_road_width * 0.1 if previous_y == height / 2 else near_road_width * 0.8  # Better perspective
+		var far_road_width = near_road_width * 0.8
 		
-		# Validate road width
-		if near_road_width <= 0 or far_road_width <= 0:
+		# Ensure minimum road width
+		if near_road_width < 1.0:
 			previous_y = near_y
 			continue
 		
@@ -305,10 +337,16 @@ func _draw_quad(x1: float, y1: float, x2: float, y2: float,
 		return
 	
 	# Check for degenerate quad
-	if (abs(x1 - x2) < 0.01 and abs(x3 - x4) < 0.01) or \
-	   (abs(y1 - y4) < 0.01 and abs(y2 - y3) < 0.01):
+	var min_size = 0.1
+	if abs(x1 - x2) < min_size and abs(x3 - x4) < min_size and \
+	   abs(x1 - x3) < min_size and abs(x2 - x4) < min_size:
 		return
 	
+	if abs(y1 - y4) < min_size and abs(y2 - y3) < min_size and \
+	   abs(y1 - y2) < min_size and abs(y3 - y4) < min_size:
+		return
+	
+	# Ensure points are in correct order
 	var points = PackedVector2Array([
 		Vector2(x1, y1),
 		Vector2(x2, y2),
@@ -316,4 +354,5 @@ func _draw_quad(x1: float, y1: float, x2: float, y2: float,
 		Vector2(x4, y4)
 	])
 	
-	draw_colored_polygon(points, color)
+	if points.size() == 4:
+		draw_colored_polygon(points, color)
