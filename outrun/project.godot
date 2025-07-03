@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="Outrun"
-run/main_scene="uid://2qc80tsn3st8"
+run/main_scene="uid://cxqm1ahj4cgg1"
 config/features=PackedStringArray("4.4", "Mobile")
 config/icon="res://icon.svg"
 
